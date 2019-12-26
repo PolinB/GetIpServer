@@ -66,8 +66,10 @@ private:
 
     static const int SOCKET_ERROR = -1;
     static const int MAX_EVENTS_SIZE = 32;
+    static const int THREAD_NUMBER = 8;
     int socketDescriptor;
 
+    std::atomic<bool> stop;
     mutable std::mutex m;
     std::condition_variable hasClientInQueue;
     std::vector<std::thread> threads;

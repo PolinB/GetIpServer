@@ -17,31 +17,47 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 
-Server::Server(int port) : queueSize(0) {
-    for (int i = 0; i < 8; ++i) {
+Server::Server(int port) : queueSize(0), stop(false) {
+    for (int i = 0; i < THREAD_NUMBER; ++i) {
         threads.emplace_back([this] {
             while (true) {
                 std::unique_lock<std::mutex> lg(m);
-                while (queueSize.fetch_sub(1) <= 0) {
-                    std::cout << "In while" << std::endl;
-                    queueSize += 1;
-                    hasClientInQueue.wait(lg);
-                }
-
-                int clientFd = workQueue.front();
-                workQueue.pop();
-                Client &client = clients[clientFd];
-                std::string request = client.getTask();
+                    while (queueSize.fetch_sub(1) <= 0 && !stop) {
+                        std::cout << "In while" << std::endl;
+                        queueSize += 1;
+                        hasClientInQueue.wait(lg);
+                    }
+                    if (stop) {
+                        break;
+                    }
+                    int clientFd = workQueue.front();
+                    workQueue.pop();
+                    // client was deleted
+                    if (clients.find(clientFd) == clients.end()) {
+                        continue;
+                    }
+                    Client &client = clients[clientFd];
+                    std::string request = client.getTask();
                 lg.unlock();
 
+                if (stop) {
+                    break;
+                }
                 doTask(clientFd, request);
+                if (stop) {
+                    break;
+                }
 
                 lg.lock();
-                if (!client.tasks.empty()) {
-                    workQueue.push(clientFd);
-                    queueSize += 1;
-                    hasClientInQueue.notify_one();
-                }
+                    // client was deleted
+                    if (clients.find(clientFd) == clients.end()) {
+                        continue;
+                    }
+                    if (!client.tasks.empty()) {
+                        workQueue.push(clientFd);
+                        queueSize += 1;
+                        hasClientInQueue.notify_one();
+                    }
                 lg.unlock();
             }
         });
@@ -73,7 +89,24 @@ void Server::start() {
     listeningWithEpoll();
 }
 
-Server::~Server() = default;
+Server::~Server() {
+    std::cout << "Hello from begin of destructor" << std::endl;
+    std::unique_lock<std::mutex> lg(m);
+    stop = true;
+    hasClientInQueue.notify_all();
+    for (size_t i = 0; i < THREAD_NUMBER; ++i) {
+        threads[i].join();
+    }
+    std::cout << "Hello from after join of destructor" << std::endl;
+    for (const auto& p : clients) {
+        int clientFd = p.first;
+        if (close(clientFd) < 0) {
+            std::cerr << "Descriptor was not closed : " << clientFd << "." << std::endl;
+        } else {
+            std::cout << "Descriptor was closed : " << clientFd << "." << std::endl;
+        }
+    }
+}
 
 int Server::set_nonblock(int fd) {
     int flags;
@@ -131,6 +164,7 @@ void Server::listeningWithEpoll() {
                 clients[client] = Client(client);
                 lg.unlock();
             } else if (events[i].data.fd == signalFd) {
+                std::cerr << "Hello from exit" << std::endl;
                 exit(0);
             } else {
                 char buf[1024];
@@ -142,11 +176,10 @@ void Server::listeningWithEpoll() {
 
                 int r = recv(clientFd, buf, sizeof(buf), 0);
                 if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
-                    shutdown(clientFd, SHUT_RDWR);
-                    close(clientFd);
-
                     lg.lock();
-                    clients.erase(clientFd);
+                        shutdown(clientFd, SHUT_RDWR);
+                        close(clientFd);
+                        clients.erase(clientFd);
                     lg.unlock();
                     continue;
                 }
@@ -154,22 +187,14 @@ void Server::listeningWithEpoll() {
                 std::string request(buf, r - 2);
 
                 lg.lock();
-                Client &curClient = clients[clientFd];
-                curClient.addTask(request);
-                if (inQueue.find(clientFd) == inQueue.end()) {
-                    workQueue.push(clientFd);
-                    queueSize += 1;
-                    hasClientInQueue.notify_one();
-                }
+                    Client &curClient = clients[clientFd];
+                    curClient.addTask(request);
+                    if (inQueue.find(clientFd) == inQueue.end()) {
+                        workQueue.push(clientFd);
+                        queueSize += 1;
+                        hasClientInQueue.notify_one();
+                    }
                 lg.unlock();
-
-                // Это вынести бы в отдельный поток для обработки... и не текущий реквест обрабатывать, а первый на очереди
-                // Возможно стоит сделать также очередь клиентов...
-                // При этом стоит поскольку каждому клиенту нужно примерно одинаковое время давать, то стоит
-                // организовывать очередь как-то в стиле есть на очереди клиенты, если у всех есть таски, то в порядке
-                // поступления тасок, если нет, но добавляется, то добавлять в конец всех, если же уже выполнена таска
-                // на очереди, но список ее тасок не пуст, то в конец.
-
             }
         }
     }

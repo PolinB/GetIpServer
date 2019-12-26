@@ -24,4 +24,29 @@
   echo "yandex.ru"
     sleep 1
   echo "yandex.music.ru"
-    sleep 2 ) | telnet localhost 1235
+    sleep 2
+  echo "google.com"
+    sleep 1
+  echo "google.com"
+    sleep 1
+  echo "google.com"
+    sleep 1
+  echo "google.com"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.ru"
+    sleep 1
+  echo "yandex.music.ru"
+    sleep 2
+  ) | telnet localhost 1235
