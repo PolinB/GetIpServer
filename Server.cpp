@@ -60,44 +60,6 @@ int Server::set_nonblock(int fd) {
 #endif
 }
 
-/**
- * Сигналы на прерывание:
- *
- * Хотим если приходит SIGINT или SIGTERM завершать работу listener, epoll_wait тогда бросит ошибку,
- * но errno тогда установится в EINTR
- *
- * SIGINT ctrl+C
- * SIGTERM
- * send NOSIGNAL
- *
- * SIGKILL - нельзя обрабатывать
- * В ответ на ошибку программы приходят сигналы:
- * SIGSEGV
- * SIGBUS
- * SIGILL - illigal obstruction
- * SIGFPE
- * SIGPIPE - историческое недоразумение: пишем в socket, у которого другой конец закрыт
- *
- *
- * Ключевое слово volatile => можем обращаться из обработчика сигналов
- * volatile bool quit = false;
- *
- * setjump, longjump не использовать
- * volatile ограничивает то, как мы можем переупорядочивать код
- *
- * write и read можно вызывать из обработчика сигналов
- * read может прочитать меньше, чем есть, если пришел сигнал
- * quit = true упадет epoll_wait
- *
- * Как закьюить?
- * 1) pipe
- *    out добавить в epoll
- *    1 байт в in
- * 2) eventfd - специальный файловый дескриптор
- *    в обработчике сигналов сделать write в eventfd
- *
- */
-
 void Server::listeningWithEpoll() {
     int ePoll = epoll_create1(0);
     if (ePoll == SOCKET_ERROR) {
@@ -160,7 +122,7 @@ void Server::listeningWithEpoll() {
             if (events[i].data.fd == socketDescriptor) {
                 int client = accept(socketDescriptor, nullptr, nullptr);
                 if (client < 0) {
-                    throw ServerException("Connection failed");
+                    throw ServerException("Connection failed.");
                 }
 
                 set_nonblock(client);
@@ -172,13 +134,12 @@ void Server::listeningWithEpoll() {
 
                 if (epoll_ctl(ePoll, EPOLL_CTL_ADD, client, &event) == SOCKET_ERROR) {
                     if (close(client) < 0) {
-                        throw ServerException("Descriptor was not closed");
+                        throw ServerException("Descriptor was not closed.");
                     }
-                    throw ServerException("Failed to register");
+                    throw ServerException("Failed to register.");
                 }
 
                 clients[client] = Client(client);
-
             } else if (events[i].data.fd == signalFd) {
                 exit(0);
             } else {
@@ -194,7 +155,7 @@ void Server::listeningWithEpoll() {
                 }
 
                 std::string request(buf, r - 2);
-                std::cout << request << std::endl;
+                //std::cout << request << std::endl;
                 curClient.addTask(request);
 
                 // Это вынести бы в отдельный поток для обработки... и не текущий реквест обрабатывать, а первый на очереди
@@ -203,19 +164,23 @@ void Server::listeningWithEpoll() {
                 // организовывать очередь как-то в стиле есть на очереди клиенты, если у всех есть таски, то в порядке
                 // поступления тасок, если нет, но добавляется, то добавлять в конец всех, если же уже выполнена таска
                 // на очереди, но список ее тасок не пуст, то в конец.
-                std::vector<std::string> ips = getIps(request);
-                for (auto const &ip : ips) {
-                    int res = send(events[i].data.fd, ip.c_str(), ip.length(), 0);
-                    if (res < 0) {
-                        std::cout << "Could not send data to client " << events[i].data.fd << std::endl;
-                    }
-                }
+                doTask(events[i].data.fd, request);
             }
         }
     }
 }
 
 #pragma clang diagnostic pop
+
+void Server::doTask(int clientFd, const std::string &request) {
+    std::vector<std::string> ips = getIps(request);
+    for (auto const &ip : ips) {
+        int res = send(clientFd, ip.c_str(), ip.length(), 0);
+        if (res < 0) {
+            std::cout << "Could not send data to client " << clientFd << std::endl;
+        }
+    }
+}
 
 std::vector<std::string> Server::getIps(const std::string &request) const {
     addrinfo hints{
@@ -230,11 +195,11 @@ std::vector<std::string> Server::getIps(const std::string &request) const {
     if (errcode != 0) {
         std::string errorMessage(gai_strerror(errcode));
         freeaddrinfo(result);
-        return {"Error with website " + request + " : " + errorMessage + "\n"};
+        return {"Error with website " + request + " : " + errorMessage + ".\n"};
     }
 
     std::vector<std::string> ips;
-    ips.emplace_back("IP addresses for " + request + '\n');
+    ips.emplace_back("IP addresses for " + request + ":\n");
     for (auto p = result; p != nullptr; p = p->ai_next) {
         char buf[1024];
         inet_ntop(p->ai_family, &(reinterpret_cast<sockaddr_in *>(p->ai_addr)->sin_addr), buf, sizeof(buf));

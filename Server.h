@@ -46,6 +46,7 @@ private:
     };
     std::unordered_map<int, Client> clients;
     [[nodiscard]] std::vector<std::string> getIps(const std::string &request) const;
+    void doTask(int clientFd, const std::string &request);
     void listeningWithEpoll();
     static const int SOCKET_ERROR = -1;
     static const int MAX_EVENTS_SIZE = 32;
