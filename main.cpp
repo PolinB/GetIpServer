@@ -9,7 +9,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 int main() {
-    Server server(1234);
+    Server server(1235);
     server.start();
     // не обрабатываются ошибки, erase за квадрат и многое другое (олимпиадное программирование)
     // poll работает за линейное время

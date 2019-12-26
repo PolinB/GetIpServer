@@ -9,6 +9,10 @@
 #include <sys/epoll.h>
 #include <iostream>
 #include <cstring>
+#include <sys/signalfd.h>
+#include <stdexcept>
+#include <unistd.h>
+#include <csignal>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
@@ -59,7 +63,9 @@ int Server::set_nonblock(int fd) {
 /**
  * Сигналы на прерывание:
  *
- * Хотим если приходит SIGINT или SIGTERM завершать работу listener, epoll_wait тогда бросит ошибку, но errno тогда установится в EINTR
+ * Хотим если приходит SIGINT или SIGTERM завершать работу listener, epoll_wait тогда бросит ошибку,
+ * но errno тогда установится в EINTR
+ *
  * SIGINT ctrl+C
  * SIGTERM
  * send NOSIGNAL
@@ -106,10 +112,42 @@ void Server::listeningWithEpoll() {
 
         int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, socketDescriptor, &event);
         if (ep == SOCKET_ERROR) {
-            throw ServerException("Epool_ctl.");
+            throw ServerException("Epoll_ctl.");
         }
     }
 
+    int signalFd;
+    {
+        sigset_t all;
+        sigfillset(&all);
+
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGTERM);
+        sigaddset(&mask, SIGINT);
+
+        if (sigprocmask(SIG_SETMASK, &all, nullptr) == SOCKET_ERROR) {
+            throw ServerException("All signals not set ignored.");
+        }
+        if (sigprocmask(SIG_BLOCK, &mask, nullptr) == SOCKET_ERROR) {
+            throw ServerException("SIGINT and SIGTERM not set.");
+        }
+
+        signalFd = signalfd(-1, &mask, 0);
+
+        if (signalFd == SOCKET_ERROR) {
+            throw ServerException("Signal not create.");
+        }
+
+        epoll_event event{
+                .events = EPOLLIN | EPOLLET,
+                .data = {.fd = signalFd}
+        };
+        int result = epoll_ctl(ePoll, EPOLL_CTL_ADD, signalFd, &event);
+        if (result == SOCKET_ERROR) {
+            throw ServerException("Failed to register signalFd.");
+        }
+    }
 
     while (true) {
         epoll_event events[MAX_EVENTS_SIZE];
@@ -141,12 +179,14 @@ void Server::listeningWithEpoll() {
 
                 clients[client] = Client(client);
 
+            } else if (events[i].data.fd == signalFd) {
+                exit(0);
             } else {
                 char buf[1024];
                 Client &curClient = clients[events[i].data.fd];
 
                 int r = recv(curClient.fd, buf, sizeof(buf), 0);
-                if ((r == 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
+                if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
                     shutdown(curClient.fd, SHUT_RDWR);
                     close(curClient.fd);
                     clients.erase(curClient.fd);
@@ -154,6 +194,7 @@ void Server::listeningWithEpoll() {
                 }
 
                 std::string request(buf, r - 2);
+                std::cout << request << std::endl;
                 curClient.addTask(request);
 
                 // Это вынести бы в отдельный поток для обработки... и не текущий реквест обрабатывать, а первый на очереди
@@ -188,22 +229,23 @@ std::vector<std::string> Server::getIps(const std::string &request) const {
     int errcode = getaddrinfo(request.c_str(), "http", &hints, &result);
     if (errcode != 0) {
         std::string errorMessage(gai_strerror(errcode));
+        freeaddrinfo(result);
         return {"Error with website " + request + " : " + errorMessage + "\n"};
     }
 
-    std::vector<std::string> ans;
-    ans.emplace_back("IP addresses for " + request + '\n');
+    std::vector<std::string> ips;
+    ips.emplace_back("IP addresses for " + request + '\n');
     for (auto p = result; p != nullptr; p = p->ai_next) {
         char buf[1024];
         inet_ntop(p->ai_family, &(reinterpret_cast<sockaddr_in *>(p->ai_addr)->sin_addr), buf, sizeof(buf));
         std::string address(buf);
         address.append("\n");
-        ans.emplace_back(address);
+        ips.emplace_back(address);
     }
 
     freeaddrinfo(result);
 
-    return ans;
+    return ips;
 }
 
 Server::Client::Client(int fd) : fd(fd) {}
