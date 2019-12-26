@@ -17,7 +17,35 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 
-Server::Server(int port) {
+Server::Server(int port) : queueSize(0) {
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([this] {
+            while (true) {
+                std::unique_lock<std::mutex> lg(m);
+                while (queueSize.fetch_sub(1) <= 0) {
+                    std::cout << "In while" << std::endl;
+                    queueSize += 1;
+                    hasClientInQueue.wait(lg);
+                }
+
+                int clientFd = workQueue.front();
+                workQueue.pop();
+                Client &client = clients[clientFd];
+                std::string request = client.getTask();
+                lg.unlock();
+
+                doTask(clientFd, request);
+
+                lg.lock();
+                if (!client.tasks.empty()) {
+                    workQueue.push(clientFd);
+                    queueSize += 1;
+                    hasClientInQueue.notify_one();
+                }
+                lg.unlock();
+            }
+        });
+    }
     socketDescriptor = socket(AF_INET, SOCK_STREAM, 0);
     if (socketDescriptor == SOCKET_ERROR) {
         throw ServerException("Socket not created.");
@@ -66,50 +94,9 @@ void Server::listeningWithEpoll() {
         throw ServerException("Epoll not create.");
     }
 
-    {
-        epoll_event event{
-                .events = EPOLLIN,
-                .data = {.fd = socketDescriptor}
-        };
+    addSocketDescriptor(ePoll);
 
-        int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, socketDescriptor, &event);
-        if (ep == SOCKET_ERROR) {
-            throw ServerException("Epoll_ctl.");
-        }
-    }
-
-    int signalFd;
-    {
-        sigset_t all;
-        sigfillset(&all);
-
-        sigset_t mask;
-        sigemptyset(&mask);
-        sigaddset(&mask, SIGTERM);
-        sigaddset(&mask, SIGINT);
-
-        if (sigprocmask(SIG_SETMASK, &all, nullptr) == SOCKET_ERROR) {
-            throw ServerException("All signals not set ignored.");
-        }
-        if (sigprocmask(SIG_BLOCK, &mask, nullptr) == SOCKET_ERROR) {
-            throw ServerException("SIGINT and SIGTERM not set.");
-        }
-
-        signalFd = signalfd(-1, &mask, 0);
-
-        if (signalFd == SOCKET_ERROR) {
-            throw ServerException("Signal not create.");
-        }
-
-        epoll_event event{
-                .events = EPOLLIN | EPOLLET,
-                .data = {.fd = signalFd}
-        };
-        int result = epoll_ctl(ePoll, EPOLL_CTL_ADD, signalFd, &event);
-        if (result == SOCKET_ERROR) {
-            throw ServerException("Failed to register signalFd.");
-        }
-    }
+    int signalFd = addSignalFd(ePoll);
 
     while (true) {
         epoll_event events[MAX_EVENTS_SIZE];
@@ -139,24 +126,42 @@ void Server::listeningWithEpoll() {
                     throw ServerException("Failed to register.");
                 }
 
+                std::unique_lock<std::mutex> lg(m);
+                std::cout << "WANT LOCK" << std::endl;
                 clients[client] = Client(client);
+                lg.unlock();
             } else if (events[i].data.fd == signalFd) {
                 exit(0);
             } else {
                 char buf[1024];
-                Client &curClient = clients[events[i].data.fd];
 
-                int r = recv(curClient.fd, buf, sizeof(buf), 0);
+                std::unique_lock<std::mutex> lg(m);
+                lg.unlock();
+
+                int clientFd = events[i].data.fd;
+
+                int r = recv(clientFd, buf, sizeof(buf), 0);
                 if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
-                    shutdown(curClient.fd, SHUT_RDWR);
-                    close(curClient.fd);
-                    clients.erase(curClient.fd);
+                    shutdown(clientFd, SHUT_RDWR);
+                    close(clientFd);
+
+                    lg.lock();
+                    clients.erase(clientFd);
+                    lg.unlock();
                     continue;
                 }
 
                 std::string request(buf, r - 2);
-                //std::cout << request << std::endl;
+
+                lg.lock();
+                Client &curClient = clients[clientFd];
                 curClient.addTask(request);
+                if (inQueue.find(clientFd) == inQueue.end()) {
+                    workQueue.push(clientFd);
+                    queueSize += 1;
+                    hasClientInQueue.notify_one();
+                }
+                lg.unlock();
 
                 // Это вынести бы в отдельный поток для обработки... и не текущий реквест обрабатывать, а первый на очереди
                 // Возможно стоит сделать также очередь клиентов...
@@ -164,7 +169,7 @@ void Server::listeningWithEpoll() {
                 // организовывать очередь как-то в стиле есть на очереди клиенты, если у всех есть таски, то в порядке
                 // поступления тасок, если нет, но добавляется, то добавлять в конец всех, если же уже выполнена таска
                 // на очереди, но список ее тасок не пуст, то в конец.
-                doTask(events[i].data.fd, request);
+
             }
         }
     }
@@ -174,6 +179,9 @@ void Server::listeningWithEpoll() {
 
 void Server::doTask(int clientFd, const std::string &request) {
     std::vector<std::string> ips = getIps(request);
+
+    std::cout << "Request: " << request << std::endl;
+
     for (auto const &ip : ips) {
         int res = send(clientFd, ip.c_str(), ip.length(), 0);
         if (res < 0) {
@@ -211,6 +219,52 @@ std::vector<std::string> Server::getIps(const std::string &request) const {
     freeaddrinfo(result);
 
     return ips;
+}
+
+void Server::addSocketDescriptor(int ePoll) const {
+    epoll_event event{
+            .events = EPOLLIN,
+            .data = {.fd = socketDescriptor}
+    };
+
+    int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, socketDescriptor, &event);
+    if (ep == SOCKET_ERROR) {
+        throw ServerException("Epoll_ctl.");
+    }
+}
+
+int Server::addSignalFd(int ePoll) const {
+    int signalFd;
+    sigset_t all;
+    sigfillset(&all);
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTERM);
+    sigaddset(&mask, SIGINT);
+
+    if (sigprocmask(SIG_SETMASK, &all, nullptr) == SOCKET_ERROR) {
+        throw ServerException("All signals not set ignored.");
+    }
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) == SOCKET_ERROR) {
+        throw ServerException("SIGINT and SIGTERM not set.");
+    }
+
+    signalFd = signalfd(-1, &mask, 0);
+
+    if (signalFd == SOCKET_ERROR) {
+        throw ServerException("Signal not create.");
+    }
+
+    epoll_event event{
+            .events = EPOLLIN | EPOLLET,
+            .data = {.fd = signalFd}
+    };
+    int result = epoll_ctl(ePoll, EPOLL_CTL_ADD, signalFd, &event);
+    if (result == SOCKET_ERROR) {
+        throw ServerException("Failed to register signalFd.");
+    }
+    return signalFd;
 }
 
 Server::Client::Client(int fd) : fd(fd) {}

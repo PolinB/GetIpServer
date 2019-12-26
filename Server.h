@@ -26,7 +26,11 @@
 #include <csignal>
 #include <zconf.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 #include "ServerException.h"
 
@@ -44,12 +48,27 @@ private:
         int fd;
         std::queue<std::string> tasks;
     };
+
     std::unordered_map<int, Client> clients;
-    [[nodiscard]] std::vector<std::string> getIps(const std::string &request) const;
-    void doTask(int clientFd, const std::string &request);
+
+    std::queue<int> workQueue;
+    std::unordered_set<int> inQueue;
+    std::atomic<int> queueSize;
+
+    static int set_nonblock(int fd);
+
+    void addSocketDescriptor(int ePoll) const;
+    int addSignalFd(int ePoll) const;
     void listeningWithEpoll();
+
+    void doTask(int clientFd, const std::string &request);
+    [[nodiscard]] std::vector<std::string> getIps(const std::string &request) const;
+
     static const int SOCKET_ERROR = -1;
     static const int MAX_EVENTS_SIZE = 32;
-    static int set_nonblock(int fd);
     int socketDescriptor;
+
+    mutable std::mutex m;
+    std::condition_variable hasClientInQueue;
+    std::vector<std::thread> threads;
 };
