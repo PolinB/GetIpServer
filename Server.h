@@ -39,6 +39,13 @@ public:
     explicit Server(int port);
     ~Server();
     void start();
+    int getSocketDescriptor();
+    void addClient(int client);
+    void eraseClient(int client);
+    void addTask(int client, const std::string& request);
+
+    std::atomic<bool> stop;
+
 private:
     struct Client {
         Client();
@@ -50,26 +57,18 @@ private:
     };
 
     std::unordered_map<int, Client> clients;
-
     std::queue<int> workQueue;
     std::unordered_set<int> inQueue;
+
     std::atomic<int> queueSize;
 
-    static int set_nonblock(int fd);
-
-    void addSocketDescriptor(int ePoll) const;
-    int addSignalFd(int ePoll) const;
-    void listeningWithEpoll();
-
     void doTask(int clientFd, const std::string &request);
+
     [[nodiscard]] std::vector<std::string> getIps(const std::string &request) const;
-
     static const int SOCKET_ERROR = -1;
-    static const int MAX_EVENTS_SIZE = 32;
     static const int THREAD_NUMBER = 8;
-    int socketDescriptor;
 
-    std::atomic<bool> stop;
+    int socketDescriptor;
     mutable std::mutex m;
     std::condition_variable hasClientInQueue;
     std::vector<std::thread> threads;

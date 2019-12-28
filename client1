@@ -49,4 +49,4 @@
     sleep 1
   echo "yandex.music.ru"
     sleep 2
-  ) | telnet localhost 1235
+  ) | telnet localhost 1234
