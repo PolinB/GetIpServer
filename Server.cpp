@@ -106,9 +106,14 @@ void Server::doTask(int clientFd, const std::string &request) {
     std::cout << "Request: " << request << std::endl;
 
     for (auto const &ip : ips) {
-        int res = send(clientFd, ip.c_str(), ip.length(), 0);
-        if (res < 0) {
-            std::cout << "Could not send data to client " << clientFd << std::endl;
+        size_t curPos = 0;
+        while (curPos < ip.length()) {
+            int res = send(clientFd, ip.c_str() + curPos, ip.length(), 0);
+            if (res == SOCKET_ERROR) {
+                std::cout << "Could not send data to client " << clientFd << std::endl;
+                break;
+            }
+            curPos += res;
         }
     }
 }
