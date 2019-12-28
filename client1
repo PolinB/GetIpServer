@@ -2,51 +2,99 @@
 ( echo "google.com"
     sleep 2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.music.ru"
     sleep 2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "google.com"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
   echo "yandex.ru"
-    sleep 1
+    sleep 0.2
+  echo "yandex.music.ru"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.music.ru"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "google.com"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
+  echo "yandex.ru"
+    sleep 0.2
   echo "yandex.music.ru"
     sleep 2
   ) | telnet localhost 1234
