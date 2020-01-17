@@ -4,8 +4,6 @@
 
 #include "EPollCoordinator.h"
 
-#include <utility>
-
 EPollCoordinator::EPollCoordinator() {
     ePoll = epoll_create1(0);
     if (ePoll == SOCKET_ERROR) {
@@ -48,21 +46,24 @@ void EPollCoordinator::addSignalFd() {
     }
 }
 
-void EPollCoordinator::addDescriptor(int socketDescriptor, std::function<void()> function) {
+void EPollCoordinator::addDescriptor(int descriptor, std::function<void()> *function) {
     epoll_event event{
             .events = EPOLLIN,
-            .data = {.fd = socketDescriptor}
+            .data = {.fd = descriptor}
     };
 
-    int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, socketDescriptor, &event);
+    int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, descriptor, &event);
     if (ep == SOCKET_ERROR) {
         throw ServerException("Epoll_ctl failed.");
     }
 
-    functions[socketDescriptor] = std::move(function);
+    functions[descriptor] = function;
+
+    std::cout << "Descriptor " << descriptor << " was connected.\n";
 }
 
 void EPollCoordinator::start() {
+    std::cout << "Start epoll.\n";
     while (true) {
         epoll_event events[MAX_EVENTS_SIZE];
         int nfds = epoll_wait(ePoll, events, MAX_EVENTS_SIZE, -1);
@@ -74,11 +75,20 @@ void EPollCoordinator::start() {
             if (events[i].data.fd == signalFd) {
                 exit(0);
             } else {
-                std::cout << "Try func " << events[i].data.fd << "\n";
-                (functions[events[i].data.fd])();
+                std::cout << "Call function from " << events[i].data.fd << ".\n";
+                (*functions[events[i].data.fd])();
             }
         }
     }
 }
 
-EPollCoordinator::~EPollCoordinator() = default;
+EPollCoordinator::~EPollCoordinator() {
+    if (ePoll != -1) {
+        close(ePoll);
+    }
+}
+
+void EPollCoordinator::eraseDescriptor(int descriptor) {
+    functions.erase(descriptor);
+    std::cout << "Descriptor " << descriptor << " was disconnected.\n";
+}

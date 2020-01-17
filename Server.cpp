@@ -3,14 +3,6 @@
 //
 
 #include "Server.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <iostream>
-#include <stdexcept>
-#include <unistd.h>
-#include <string.h>
-#include <netdb.h>
-#include <arpa/inet.h>
 
 int Server::set_nonblock(int fd) {
     int flags;
@@ -25,10 +17,10 @@ int Server::set_nonblock(int fd) {
 #endif
 }
 
-Server::Server(int port, EPollCoordinator *_ePollCoordinator)
+Server::Server(int port, EPollCoordinator &_ePollCoordinator)
         : queueSize(0), stop(false), ePollCoordinator(_ePollCoordinator) {
-    socketDescriptor = socket(AF_INET, SOCK_STREAM, 0);
-    if (socketDescriptor == SOCKET_ERROR) {
+    serverDescriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverDescriptor == SOCKET_ERROR) {
         throw ServerException("Socket not created.");
     }
 
@@ -38,42 +30,41 @@ Server::Server(int port, EPollCoordinator *_ePollCoordinator)
             .sin_addr = {.s_addr = 0}
     };
 
-    int b = bind(socketDescriptor, reinterpret_cast<sockaddr const *>(&local_addr), sizeof local_addr);
+    int b = bind(serverDescriptor, reinterpret_cast<sockaddr const *>(&local_addr), sizeof local_addr);
     if (b == SOCKET_ERROR) {
         throw ServerException("Socket not binded.");
     }
 
     serverFunction = [this]() {
-        std::cout << "Hello from server func\n";
-        int client = accept(socketDescriptor, nullptr, nullptr);
+        int client = accept(serverDescriptor, nullptr, nullptr);
         if (client < 0) {
             throw ServerException("Connection failed.");
         }
+        std::cout << "New client " << client << ".\n";
 
         set_nonblock(client);
 
         std::function<void()> clientFunction([this, client]() {
-            std::cout << "Hello from client\n";
             char buf[1024];
             int r = recv(client, buf, sizeof(buf), 0);
             if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
-                std::cout << "r = " << r << "\n";
                 eraseClient(client);
+                ePollCoordinator.eraseDescriptor(client);
                 return;
             }
             std::string request(buf, r - 2);
             addTask(client, request);
         });
-        ePollCoordinator->addDescriptor(client, clientFunction);
 
-        addClient(client);
+        addClient(client, clientFunction);
+        ePollCoordinator.addDescriptor(client, &clients[client].function);
     };
 
-    set_nonblock(socketDescriptor);
+    set_nonblock(serverDescriptor);
 
     start();
 
-    ePollCoordinator->addDescriptor(socketDescriptor, serverFunction);
+    ePollCoordinator.addDescriptor(serverDescriptor, &serverFunction);
 }
 
 void Server::start() {
@@ -115,13 +106,15 @@ void Server::start() {
                     workQueue.push(clientFd);
                     queueSize += 1;
                     hasClientInQueue.notify_one();
+                } else {
+                    client.inQueue = false;
                 }
                 lg.unlock();
             }
         });
     }
 
-    if (listen(socketDescriptor, SOMAXCONN) == SOCKET_ERROR) {
+    if (listen(serverDescriptor, SOMAXCONN) == SOCKET_ERROR) {
         throw ServerException("Socket not listen.");
     }
 }
@@ -202,9 +195,9 @@ std::vector<std::string> Server::getIps(const std::string &request) const {
     return ips;
 }
 
-void Server::addClient(int client) {
+void Server::addClient(int client, std::function<void()> &function) {
     std::unique_lock<std::mutex> lg(m);
-    clients[client] = Client(client);
+    clients[client] = Client(client, function);
     lg.unlock();
 }
 
@@ -220,15 +213,16 @@ void Server::addTask(int client, const std::string &request) {
     std::unique_lock<std::mutex> lg(m);
     Client &curClient = clients[client];
     curClient.addTask(request);
-    if (inQueue.find(client) == inQueue.end()) {
+    if (!curClient.inQueue) {
         workQueue.push(client);
+        curClient.inQueue = true;
         queueSize += 1;
         hasClientInQueue.notify_one();
     }
     lg.unlock();
 }
 
-Server::Client::Client(int _fd) : fd(_fd) {}
+Server::Client::Client(int _fd, std::function<void()> &_function) : fd(_fd), function(std::move(_function)) {}
 
 void Server::Client::addTask(const std::string &task) {
     tasks.push(task);
@@ -240,4 +234,4 @@ std::string Server::Client::getTask() {
     return result;
 }
 
-Server::Client::Client() : fd(0) {}
+Server::Client::Client() : fd(-1) {}
