@@ -4,32 +4,16 @@
 
 #include "EPollCoordinator.h"
 
-int EPollCoordinator::set_nonblock(int fd) {
-    int flags;
-#if defined(O_NONBLOCK)
-    if (-1 == (flags = fcntl(fd, F_GETFL, 0))) {
-        flags = 0;
-    }
-    return fcntl(fd, F_GETFL, flags | O_NONBLOCK);
-#else
-    flags = 1;
-    return ioctl(fd, FIONBIO, &flags);
-#endif
-}
+#include <utility>
 
-EPollCoordinator::EPollCoordinator(int port) : server(port) {
+EPollCoordinator::EPollCoordinator() {
     ePoll = epoll_create1(0);
     if (ePoll == SOCKET_ERROR) {
         throw ServerException("Epoll not create.");
     }
 
-    //signalFd = addSignalFd();
+    signalFd = -1;
     addSignalFd();
-    set_nonblock(server.getSocketDescriptor());
-
-    server.start();
-
-    addSocketDescriptor(server.getSocketDescriptor());
 }
 
 void EPollCoordinator::addSignalFd() {
@@ -64,7 +48,7 @@ void EPollCoordinator::addSignalFd() {
     }
 }
 
-void EPollCoordinator::addSocketDescriptor(int socketDescriptor) const {
+void EPollCoordinator::addDescriptor(int socketDescriptor, std::function<void()> function) {
     epoll_event event{
             .events = EPOLLIN,
             .data = {.fd = socketDescriptor}
@@ -72,8 +56,10 @@ void EPollCoordinator::addSocketDescriptor(int socketDescriptor) const {
 
     int ep = epoll_ctl(ePoll, EPOLL_CTL_ADD, socketDescriptor, &event);
     if (ep == SOCKET_ERROR) {
-        throw ServerException("Epoll_ctl.");
+        throw ServerException("Epoll_ctl failed.");
     }
+
+    functions[socketDescriptor] = std::move(function);
 }
 
 void EPollCoordinator::start() {
@@ -85,44 +71,11 @@ void EPollCoordinator::start() {
         }
 
         for (size_t i = 0; i < nfds; ++i) {
-            if (events[i].data.fd == server.getSocketDescriptor()) {
-                int client = accept(server.getSocketDescriptor(), nullptr, nullptr);
-                if (client < 0) {
-                    throw ServerException("Connection failed.");
-                }
-
-                set_nonblock(client);
-
-                epoll_event event{
-                        .events = EPOLLIN,
-                        .data = {.fd = client}
-                };
-
-                if (epoll_ctl(ePoll, EPOLL_CTL_ADD, client, &event) == SOCKET_ERROR) {
-                    if (close(client) < 0) {
-                        throw ServerException("Descriptor was not closed.");
-                    }
-                    throw ServerException("Failed to register.");
-                }
-
-                server.addClient(client);
-
-            } else if (events[i].data.fd == signalFd) {
+            if (events[i].data.fd == signalFd) {
                 exit(0);
             } else {
-                char buf[1024];
-
-                int clientFd = events[i].data.fd;
-
-                int r = recv(clientFd, buf, sizeof(buf), 0);
-                if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
-                    server.eraseClient(clientFd);
-                    continue;
-                }
-
-                std::string request(buf, r - 2);
-
-                server.addTask(clientFd, request);
+                std::cout << "Try func " << events[i].data.fd << "\n";
+                (functions[events[i].data.fd])();
             }
         }
     }

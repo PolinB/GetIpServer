@@ -1,8 +1,10 @@
 #include "EPollCoordinator.h"
+#include "Server.h"
 
 int main() {
     try {
-        EPollCoordinator ePoll(1234);
+        EPollCoordinator ePoll;
+        Server server(1234, &ePoll);
         ePoll.start();
     } catch (ServerException& e) {
         std::cerr << e.what();

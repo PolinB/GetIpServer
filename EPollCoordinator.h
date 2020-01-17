@@ -2,8 +2,7 @@
 // Created by polinb on 27.12.2019.
 //
 
-#ifndef GETIPSERVER_EPOLLCOORDINATOR_H
-#define GETIPSERVER_EPOLLCOORDINATOR_H
+#pragma once
 
 #include <string>
 #include <sys/socket.h>
@@ -42,25 +41,23 @@
 #include <stdexcept>
 #include <unistd.h>
 #include <csignal>
+#include <functional>
+#include <map>
 
-#include "Server.h"
+#include "ServerException.h"
 
 class EPollCoordinator {
 public:
-    explicit EPollCoordinator(int port);
+    EPollCoordinator();
     ~EPollCoordinator();
     void start();
+    void addDescriptor(int descriptor, std::function<void()>);
+    int ePoll;
 private:
-    void addSocketDescriptor(int socketDescriptor) const;
     void addSignalFd();
-    static int set_nonblock(int fd);
-
     static const int SOCKET_ERROR = -1;
     static const int MAX_EVENTS_SIZE = 32;
-    int ePoll;
     int signalFd;
-    Server server;
+    std::unordered_map<int, std::function<void()>> functions;
 };
 
-
-#endif //GETIPSERVER_EPOLLCOORDINATOR_H

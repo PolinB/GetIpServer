@@ -32,14 +32,13 @@
 #include <condition_variable>
 #include <atomic>
 
-#include "ServerException.h"
+#include "EPollCoordinator.h"
 
 class Server {
 public:
-    explicit Server(int port);
+    Server(int port, EPollCoordinator* ePollCoordinator);
     ~Server();
     void start();
-    int getSocketDescriptor();
     void addClient(int client);
     void eraseClient(int client);
     void addTask(int client, const std::string& request);
@@ -50,10 +49,12 @@ private:
     struct Client {
         Client();
         explicit Client(int fd);
+
         void addTask(const std::string& task);
         std::string getTask();
-        int fd;
         std::queue<std::string> tasks;
+
+        int fd;
     };
 
     std::unordered_map<int, Client> clients;
@@ -63,12 +64,15 @@ private:
     std::atomic<int> queueSize;
 
     void doTask(int clientFd, const std::string &request);
+    int set_nonblock(int fd);
 
     [[nodiscard]] std::vector<std::string> getIps(const std::string &request) const;
     static const int SOCKET_ERROR = -1;
     static const int THREAD_NUMBER = 8;
 
+    EPollCoordinator* ePollCoordinator;
     int socketDescriptor;
+    std::function<void()> serverFunction;
     mutable std::mutex m;
     std::condition_variable hasClientInQueue;
     std::vector<std::thread> threads;
