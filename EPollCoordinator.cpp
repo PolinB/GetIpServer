@@ -73,7 +73,7 @@ void EPollCoordinator::start() {
 
         for (size_t i = 0; i < nfds; ++i) {
             if (events[i].data.fd == signalFd) {
-                exit(0);
+                return;
             } else {
                 std::cout << "Call function from " << events[i].data.fd << ".\n";
                 (*functions[events[i].data.fd])();
