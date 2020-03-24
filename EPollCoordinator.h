@@ -23,7 +23,6 @@
 #include <cstring>
 #include <iostream>
 #include <csignal>
-#include <zconf.h>
 #include <unordered_map>
 #include <queue>
 #include <atomic>

@@ -48,8 +48,8 @@ Server::Server(int port, EPollCoordinator &_ePollCoordinator)
             char buf[1024];
             int r = recv(client, buf, sizeof(buf), 0);
             if ((r <= 0 && errno != EAGAIN) || strncmp(buf, "exit", 4) == 0) {
-                eraseClient(client);
                 ePollCoordinator.eraseDescriptor(client);
+                eraseClient(client);
                 return;
             }
             std::string request(buf, r - 2);
